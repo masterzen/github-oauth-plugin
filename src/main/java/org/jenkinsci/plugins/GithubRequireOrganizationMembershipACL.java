@@ -26,31 +26,30 @@ THE SOFTWARE.
  */
 package org.jenkinsci.plugins;
 
-import org.acegisecurity.Authentication;
-import org.jenkinsci.plugins.github_branch_source.GitHubSCMSource;
-import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
-import org.kohsuke.stapler.Stapler;
-import org.kohsuke.stapler.StaplerRequest;
-
-import java.net.URI;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.logging.Logger;
-
-import javax.annotation.Nonnull;
-
 import hudson.model.AbstractItem;
-import hudson.model.AbstractProject;
 import hudson.model.Describable;
 import hudson.model.Item;
 import hudson.plugins.git.GitSCM;
 import hudson.plugins.git.UserRemoteConfig;
 import hudson.security.ACL;
 import hudson.security.Permission;
-import jenkins.branch.MultiBranchProject;
 import jenkins.model.Jenkins;
-import jenkins.scm.api.SCMSource;
+import jenkins.plugins.git.GitSCMSource;
+import jenkins.scm.api.SCMNavigatorOwner;
+import jenkins.scm.api.SCMSourceOwner;
+import jenkins.triggers.SCMTriggerItem;
+import org.acegisecurity.Authentication;
+import org.jenkinsci.plugins.github_branch_source.GitHubSCMSource;
+import org.kohsuke.stapler.Stapler;
+import org.kohsuke.stapler.StaplerRequest;
+
+import javax.annotation.Nonnull;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.logging.Logger;
 
 /**
  * @author Mike
@@ -253,9 +252,9 @@ public class GithubRequireOrganizationMembershipACL extends ACL {
     }
 
     public boolean hasRepositoryPermission(GithubAuthenticationToken authenticationToken, Permission permission) {
-        String repositoryName = getRepositoryName();
+        List<String> repositoryNames = getRepositoryNames();
 
-        if (repositoryName == null) {
+        if (repositoryNames.isEmpty()) {
             if (authenticatedUserCreateJobPermission) {
                 if (permission.equals(Item.READ) ||
                         permission.equals(Item.CONFIGURE) ||
@@ -269,51 +268,60 @@ public class GithubRequireOrganizationMembershipACL extends ACL {
             } else {
                 return false;
             }
-        } else if (checkReadPermission(permission) &&
-                authenticationToken.isPublicRepository(repositoryName)) {
-            return true;
-        } else {
-            return authenticationToken.hasRepositoryPermission(repositoryName, permission);
         }
+
+        for (String repositoryName : repositoryNames) {
+            if (checkReadPermission(permission) &&
+                authenticationToken.isPublicRepository(repositoryName)) {
+                return true;
+            } else {
+                if (authenticationToken.hasRepositoryPermission(repositoryName, permission)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    private String getRepositoryName() {
-        String repositoryName = null;
-        String repoUrl = null;
-        Describable scm = null;
-        if (this.item instanceof WorkflowJob) {
-            WorkflowJob project = (WorkflowJob) item;
-            if (project.getProperty(BranchJobProperty.class) != null) {
-                scm = project.getProperty(BranchJobProperty.class).getBranch().getScm();
-            } else {
-                scm = project.getTypicalSCM();
-            }
-        } else if (this.item instanceof MultiBranchProject) {
-            MultiBranchProject project = (MultiBranchProject) item;
-            scm = (SCMSource) project.getSCMSources().get(0);
-        } else if (this.item instanceof AbstractProject) {
-            AbstractProject project = (AbstractProject) item;
-            scm = project.getScm();
+    private List<String> getRepositoryNames() {
+        List<String> repositoryNames = new ArrayList<String>();
+        Collection<? extends Describable> scms = null;
+
+        if (this.item instanceof SCMTriggerItem) {
+            SCMTriggerItem project = (SCMTriggerItem) item;
+            scms = project.getSCMs();
+        } else if (this.item instanceof SCMNavigatorOwner) {
+            SCMNavigatorOwner project = (SCMNavigatorOwner) item;
+            scms = project.getSCMSources();
+        } else if (this.item instanceof SCMSourceOwner) {
+            SCMSourceOwner project = (SCMSourceOwner) item;
+            scms = project.getSCMSources();
         }
-        if (scm instanceof GitHubSCMSource) {
-            GitHubSCMSource git = (GitHubSCMSource) scm;
-            repoUrl = git.getRemote();
-        } else if (scm instanceof GitSCM) {
-            GitSCM git = (GitSCM) scm;
-            List<UserRemoteConfig> userRemoteConfigs = git.getUserRemoteConfigs();
-            if (!userRemoteConfigs.isEmpty()) {
-                repoUrl = userRemoteConfigs.get(0).getUrl();
+        for (Describable scm : scms) {
+            String repoUrl = null;
+            if (scm instanceof GitHubSCMSource) {
+                GitHubSCMSource git = (GitHubSCMSource) scm;
+                repoUrl = git.getRemote();
+            } else if (scm instanceof GitSCMSource) {
+                GitSCMSource git = (GitSCMSource) scm;
+                repoUrl = git.getRemote();
+            } else if (scm instanceof GitSCM) {
+                GitSCM git = (GitSCM) scm;
+                List<UserRemoteConfig> userRemoteConfigs = git.getUserRemoteConfigs();
+                if (!userRemoteConfigs.isEmpty()) {
+                    repoUrl = userRemoteConfigs.get(0).getUrl();
+                }
+            }
+            if (repoUrl != null) {
+                GitHubRepositoryName githubRepositoryName =
+                    GitHubRepositoryName.create(repoUrl);
+                if (githubRepositoryName != null) {
+                    repositoryNames.add(githubRepositoryName.userName + "/"
+                        + githubRepositoryName.repositoryName);
+                }
             }
         }
-        if (repoUrl != null) {
-            GitHubRepositoryName githubRepositoryName =
-                GitHubRepositoryName.create(repoUrl);
-            if (githubRepositoryName != null) {
-                repositoryName = githubRepositoryName.userName + "/"
-                    + githubRepositoryName.repositoryName;
-            }
-        }
-        return repositoryName;
+        return repositoryNames;
     }
 
     public GithubRequireOrganizationMembershipACL(String adminUserNames,

@@ -26,47 +26,9 @@ THE SOFTWARE.
  */
 package org.jenkinsci.plugins;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-
-import junit.framework.TestCase;
-
-import org.acegisecurity.Authentication;
-import org.acegisecurity.GrantedAuthority;
-import org.acegisecurity.GrantedAuthorityImpl;
-import org.acegisecurity.providers.anonymous.AnonymousAuthenticationToken;
-import org.jenkinsci.plugins.github_branch_source.GitHubSCMSource;
-import org.jenkinsci.plugins.workflow.job.WorkflowJob;
-import org.jenkinsci.plugins.workflow.multibranch.BranchJobProperty;
-import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.kohsuke.github.GHMyself;
-import org.kohsuke.github.GHOrganization;
-import org.kohsuke.github.GHPerson;
-import org.kohsuke.github.GHPersonSet;
-import org.kohsuke.github.GHRepository;
-import org.kohsuke.github.GHUser;
-import org.kohsuke.github.GitHub;
-import org.kohsuke.github.GitHubBuilder;
-import org.kohsuke.github.PagedIterable;
-import org.kohsuke.github.RateLimitHandler;
-import org.kohsuke.github.extras.OkHttpConnector;
-import org.mockito.Mock;
-import org.mockito.Mockito;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
+import com.google.common.collect.Lists;
 import hudson.model.Hudson;
 import hudson.model.Item;
 import hudson.model.Messages;
@@ -76,10 +38,30 @@ import hudson.plugins.git.UserRemoteConfig;
 import hudson.scm.NullSCM;
 import hudson.security.Permission;
 import hudson.security.PermissionScope;
-import jenkins.branch.Branch;
 import jenkins.branch.MultiBranchProject;
 import jenkins.model.Jenkins;
 import jenkins.scm.api.SCMSource;
+import junit.framework.TestCase;
+import org.acegisecurity.Authentication;
+import org.acegisecurity.GrantedAuthority;
+import org.acegisecurity.GrantedAuthorityImpl;
+import org.acegisecurity.providers.anonymous.AnonymousAuthenticationToken;
+import org.jenkinsci.plugins.github_branch_source.GitHubSCMSource;
+import org.jenkinsci.plugins.workflow.job.WorkflowJob;
+import org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.kohsuke.github.*;
+import org.kohsuke.github.extras.OkHttpConnector;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
+
+import java.io.IOException;
+import java.util.*;
 
 /**
  *
@@ -238,7 +220,8 @@ public class GithubRequireOrganizationMembershipACLTest extends TestCase {
         GitSCM gitSCM = PowerMockito.mock(GitSCM.class);
         UserRemoteConfig userRemoteConfig = PowerMockito.mock(UserRemoteConfig.class);
         List<UserRemoteConfig> userRemoteConfigs = Arrays.asList(userRemoteConfig);
-        PowerMockito.when(project.getScm()).thenReturn(gitSCM);
+        PowerMockito.when(project.getSCMs()).thenReturn(ImmutableList.of(gitSCM));
+
         PowerMockito.when(gitSCM.getUserRemoteConfigs()).thenReturn(userRemoteConfigs);
         PowerMockito.when(userRemoteConfig.getUrl()).thenReturn(url);
         return project;
@@ -246,13 +229,9 @@ public class GithubRequireOrganizationMembershipACLTest extends TestCase {
     private WorkflowJob mockWorkflowBranchJob(String url) {
         WorkflowJob project = PowerMockito.mock(WorkflowJob.class);
         GitSCM gitSCM = PowerMockito.mock(GitSCM.class);
-        Branch branch = PowerMockito.mock(Branch.class);
-        BranchJobProperty branchJobProperty = PowerMockito.mock(BranchJobProperty.class);
         UserRemoteConfig userRemoteConfig = PowerMockito.mock(UserRemoteConfig.class);
         List<UserRemoteConfig> userRemoteConfigs = Arrays.asList(userRemoteConfig);
-        PowerMockito.when(project.getProperty(BranchJobProperty.class)).thenReturn(branchJobProperty);
-        PowerMockito.when(branchJobProperty.getBranch()).thenReturn(branch);
-        PowerMockito.when(branch.getScm()).thenReturn(gitSCM);
+        PowerMockito.doReturn(ImmutableList.of(gitSCM)).when(project).getSCMs();
         PowerMockito.when(gitSCM.getUserRemoteConfigs()).thenReturn(userRemoteConfigs);
         PowerMockito.when(userRemoteConfig.getUrl()).thenReturn(url);
         return project;
@@ -260,12 +239,26 @@ public class GithubRequireOrganizationMembershipACLTest extends TestCase {
     private WorkflowJob mockWorkflowJob(String url) {
         WorkflowJob project = PowerMockito.mock(WorkflowJob.class);
         GitSCM gitSCM = PowerMockito.mock(GitSCM.class);
-        Branch branch = PowerMockito.mock(Branch.class);
         UserRemoteConfig userRemoteConfig = PowerMockito.mock(UserRemoteConfig.class);
         List<UserRemoteConfig> userRemoteConfigs = Arrays.asList(userRemoteConfig);
-        PowerMockito.when(project.getTypicalSCM()).thenReturn(gitSCM);
+        PowerMockito.doReturn(ImmutableList.of(gitSCM)).when(project).getSCMs();
         PowerMockito.when(gitSCM.getUserRemoteConfigs()).thenReturn(userRemoteConfigs);
         PowerMockito.when(userRemoteConfig.getUrl()).thenReturn(url);
+        return project;
+    }
+
+    private WorkflowJob mockMultipleRepositoryWorkflowJob(String... urls) {
+        WorkflowJob project = PowerMockito.mock(WorkflowJob.class);
+        List<GitSCM> scms = Lists.newArrayList();
+        for (String url: urls) {
+            GitSCM gitSCM = PowerMockito.mock(GitSCM.class);
+            UserRemoteConfig userRemoteConfig = PowerMockito.mock(UserRemoteConfig.class);
+            PowerMockito.when(userRemoteConfig.getUrl()).thenReturn(url);
+            List<UserRemoteConfig> userRemoteConfigs = Arrays.asList(userRemoteConfig);
+            PowerMockito.when(gitSCM.getUserRemoteConfigs()).thenReturn(userRemoteConfigs);
+            scms.add(gitSCM);
+        }
+        PowerMockito.doReturn(scms).when(project).getSCMs();
         return project;
     }
 
@@ -284,11 +277,13 @@ public class GithubRequireOrganizationMembershipACLTest extends TestCase {
         GHMyself me = mockGHMyselfAs("Me");
         mockReposFor(me, Arrays.asList("me/a-repo"));
         mockOrgRepos(me, ImmutableMap.of("some-org", Arrays.asList("some-org/a-public-repo")));
+
         String repoUrl = "https://github.com/me/a-repo.git";
         Project mockProject = mockProject(repoUrl);
         MultiBranchProject mockMultiBranchProject = mockMultiBranchProject(repoUrl);
         WorkflowJob mockWorkflowBranchJob = mockWorkflowBranchJob(repoUrl);
         WorkflowJob mockWorkflowJob = mockWorkflowJob(repoUrl);
+
         GithubRequireOrganizationMembershipACL workflowJobBranchAcl = aclForWorkflowJob(mockWorkflowBranchJob);
         GithubRequireOrganizationMembershipACL workflowJobAcl = aclForWorkflowJob(mockWorkflowJob);
         GithubRequireOrganizationMembershipACL multiBranchProjectAcl = aclForMultiBranchProject(mockMultiBranchProject);
@@ -304,6 +299,31 @@ public class GithubRequireOrganizationMembershipACLTest extends TestCase {
         assertTrue(multiBranchProjectAcl.hasPermission(authenticationToken, Item.READ));
         assertTrue(multiBranchProjectAcl.hasPermission(authenticationToken, Item.BUILD));
     }
+
+    @Test
+    public void testCanReadAndBuildMultiRepoJobsWhenIDontOwnOneOfTheRepo() throws IOException {
+        GHMyself me = mockGHMyselfAs("Me");
+        mockReposFor(me, Arrays.asList("me/a-repo"));
+        mockOrgRepos(me, ImmutableMap.of("some-org", Arrays.asList("some-org/a-public-repo")));
+
+        String repoUrl = "https://github.com/me/a-repo.git";
+
+        GHRepository ghRepository = PowerMockito.mock(GHRepository.class);
+        PowerMockito.when(gh.getRepository("org-i-dont-belong-to/a-private-repo-i-dont-collaborate-on")).thenReturn(ghRepository);
+        PowerMockito.when(ghRepository.isPrivate()).thenReturn(true);
+        PowerMockito.when(ghRepository.hasAdminAccess()).thenReturn(false);
+        PowerMockito.when(ghRepository.hasPushAccess()).thenReturn(false);
+        PowerMockito.when(ghRepository.hasPullAccess()).thenReturn(false);
+
+        WorkflowJob mockMultipleRepoJob = mockMultipleRepositoryWorkflowJob("https://github.com/org-i-dont-belong-to/a-private-repo-i-dont-collaborate-on", repoUrl);
+        GithubRequireOrganizationMembershipACL mulitpleReposAcl = aclForWorkflowJob(mockMultipleRepoJob);
+
+        GithubAuthenticationToken authenticationToken = new GithubAuthenticationToken("accessToken", "https://api.github.com");
+
+        assertTrue(mulitpleReposAcl.hasPermission(authenticationToken, Item.READ));
+        assertTrue(mulitpleReposAcl.hasPermission(authenticationToken, Item.BUILD));
+    }
+
 
     @Override
     protected void tearDown() throws Exception {
