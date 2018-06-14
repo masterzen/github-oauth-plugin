@@ -26,48 +26,31 @@ THE SOFTWARE.
  */
 package org.jenkinsci.plugins;
 
-import com.google.common.base.Optional;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.squareup.okhttp.OkHttpClient;
 import com.squareup.okhttp.OkUrlFactory;
-
+import hudson.model.Item;
 import hudson.security.Permission;
 import hudson.security.SecurityRealm;
-import hudson.model.Item;
 import jenkins.model.Jenkins;
 import org.acegisecurity.GrantedAuthority;
 import org.acegisecurity.GrantedAuthorityImpl;
 import org.acegisecurity.providers.AbstractAuthenticationToken;
-import org.kohsuke.github.GHMyself;
-import org.kohsuke.github.GHOrganization;
-import org.kohsuke.github.GHPersonSet;
-import org.kohsuke.github.GHRepository;
-import org.kohsuke.github.GHTeam;
-import org.kohsuke.github.GHUser;
-import org.kohsuke.github.GitHub;
-import org.kohsuke.github.GitHubBuilder;
-import org.kohsuke.github.RateLimitHandler;
+import org.kohsuke.github.*;
 import org.kohsuke.github.extras.OkHttpConnector;
 
+import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.Proxy;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-import javax.annotation.Nonnull;
 
 
 /**
@@ -99,6 +82,9 @@ public class GithubAuthenticationToken extends AbstractAuthenticationToken {
             CacheBuilder.newBuilder().expireAfterWrite(1, CACHE_EXPIRY).build();
 
     private static final Cache<String, GithubUser> usersByIdCache =
+            CacheBuilder.newBuilder().expireAfterWrite(1, CACHE_EXPIRY).build();
+
+    private static final Cache<String, Set<String>> userOutsideCollaboratorCache =
             CacheBuilder.newBuilder().expireAfterWrite(1, CACHE_EXPIRY).build();
 
     /**
@@ -222,6 +208,7 @@ public class GithubAuthenticationToken extends AbstractAuthenticationToken {
         userOrganizationCache.invalidateAll();
         repositoriesByUserCache.invalidateAll();
         usersByIdCache.invalidateAll();
+        userOutsideCollaboratorCache.invalidateAll();
     }
 
     /**
@@ -322,7 +309,7 @@ public class GithubAuthenticationToken extends AbstractAuthenticationToken {
      * @return has organization permission
      */
     public boolean hasOrganizationPermission(String candidateName,
-            String organization) {
+            final String organization) {
         try {
             Set<String> v = userOrganizationCache.get(candidateName,new Callable<Set<String>>() {
                 @Override
@@ -331,11 +318,35 @@ public class GithubAuthenticationToken extends AbstractAuthenticationToken {
                 }
             });
 
-            return v.contains(organization);
+            if (v.contains(organization)) {
+                return true;
+            }
+/* not working
+            Set<String> outsideCollaborators = userOutsideCollaboratorCache.get(organization, new Callable<Set<String>>() {
+                @Override
+                public Set<String> call() throws Exception {
+                    // Gross hack to access outside collaborators
+                    GHOrganization org = getGitHub().getOrganization(organization);
+                    Method method = org.getClass().getDeclaredMethod("listMembers", String.class);
+                    method.setAccessible(true);
+                    PagedIterable<GHUser> it = (PagedIterable<GHUser>) method.invoke("outside_collaborators");
+                    Set<String> logins = Sets.newHashSet();
+                    for (GHUser user: it) {
+                        logins.add(user.getLogin());
+                    }
+                    return logins;
+                }
+            });
+
+            return outsideCollaborators.contains(candidateName);
+*/
+            return false;
         } catch (ExecutionException e) {
             throw new RuntimeException("authorization failed for user = "
                     + candidateName, e);
         }
+
+
     }
 
     public boolean hasRepositoryPermission(String repositoryName, Permission permission) {
