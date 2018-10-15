@@ -299,27 +299,29 @@ public class GithubRequireOrganizationMembershipACL extends ACL {
             SCMSourceOwner project = (SCMSourceOwner) item;
             scms = project.getSCMSources();
         }
-        for (Describable scm : scms) {
-            String repoUrl = null;
-            if (scm instanceof GitHubSCMSource) {
-                GitHubSCMSource git = (GitHubSCMSource) scm;
-                repoUrl = git.getRemote();
-            } else if (scm instanceof GitSCMSource) {
-                GitSCMSource git = (GitSCMSource) scm;
-                repoUrl = git.getRemote();
-            } else if (scm instanceof GitSCM) {
-                GitSCM git = (GitSCM) scm;
-                List<UserRemoteConfig> userRemoteConfigs = git.getUserRemoteConfigs();
-                if (!userRemoteConfigs.isEmpty()) {
-                    repoUrl = userRemoteConfigs.get(0).getUrl();
+        if (scms != null) {
+            for (Describable scm : scms) {
+                String repoUrl = null;
+                if (scm instanceof GitHubSCMSource) {
+                    GitHubSCMSource git = (GitHubSCMSource) scm;
+                    repoUrl = git.getRemote();
+                } else if (scm instanceof GitSCMSource) {
+                    GitSCMSource git = (GitSCMSource) scm;
+                    repoUrl = git.getRemote();
+                } else if (scm instanceof GitSCM) {
+                    GitSCM git = (GitSCM) scm;
+                    List<UserRemoteConfig> userRemoteConfigs = git.getUserRemoteConfigs();
+                    if (!userRemoteConfigs.isEmpty()) {
+                        repoUrl = userRemoteConfigs.get(0).getUrl();
+                    }
                 }
-            }
-            if (repoUrl != null) {
-                GitHubRepositoryName githubRepositoryName =
-                    GitHubRepositoryName.create(repoUrl);
-                if (githubRepositoryName != null) {
-                    repositoryNames.add(githubRepositoryName.userName + "/"
-                        + githubRepositoryName.repositoryName);
+                if (repoUrl != null) {
+                    GitHubRepositoryName githubRepositoryName =
+                        GitHubRepositoryName.create(repoUrl);
+                    if (githubRepositoryName != null) {
+                        repositoryNames.add(githubRepositoryName.userName + "/"
+                            + githubRepositoryName.repositoryName);
+                    }
                 }
             }
         }
